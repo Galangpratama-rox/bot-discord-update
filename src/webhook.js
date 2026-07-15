@@ -16,26 +16,53 @@ const EMBED_COLOR = 0x2f3136;
 
 /**
  * Download gambar dari URL dan return sebagai Buffer.
- * Menggunakan wsrv.nl sebagai proxy untuk bypass hotlink/IP block.
+ * Coba wsrv.nl dulu, fallback ke URL langsung jika gagal.
  * @param {string} url
  * @returns {Promise<{buffer: Buffer, contentType: string}>}
  */
 async function downloadImage(url) {
-  // Proxy via wsrv.nl untuk bypass hotlink protection & IP block VPS
-  const proxyUrl = `https://wsrv.nl/?url=${encodeURIComponent(url)}`;
+  const attempts = [
+    // Attempt 1: proxy via wsrv.nl
+    () => axios.get(`https://wsrv.nl/?url=${encodeURIComponent(url)}`, {
+      responseType: "arraybuffer",
+      timeout: 15000,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+      },
+    }),
+    // Attempt 2: langsung ke URL asli dengan spoofed headers
+    () => axios.get(url, {
+      responseType: "arraybuffer",
+      timeout: 15000,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://otakudesu.blog/",
+        "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+      },
+    }),
+    // Attempt 3: proxy via images.weserv.nl (alias lain wsrv.nl)
+    () => axios.get(`https://images.weserv.nl/?url=${encodeURIComponent(url)}&default=1`, {
+      responseType: "arraybuffer",
+      timeout: 15000,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+      },
+    }),
+  ];
 
-  const response = await axios.get(proxyUrl, {
-    responseType: "arraybuffer",
-    timeout: 15000,
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-    },
-  });
+  for (let i = 0; i < attempts.length; i++) {
+    try {
+      const response = await attempts[i]();
+      return {
+        buffer: Buffer.from(response.data),
+        contentType: response.headers["content-type"] || "image/jpeg",
+      };
+    } catch (err) {
+      console.warn(`[WEBHOOK] ⚠️ Download attempt ${i + 1} gagal: ${err.message}`);
+    }
+  }
 
-  return {
-    buffer: Buffer.from(response.data),
-    contentType: response.headers["content-type"] || "image/jpeg",
-  };
+  throw new Error("Semua attempt download gambar gagal");
 }
 
 /**
@@ -175,7 +202,6 @@ async function sendSummaryMessage(count) {
 
   const payload = {
     username: BOT_NAME,
-    content: `✅ **${count} anime baru** telah dinotifikasikan!`,
   };
 
   try {
