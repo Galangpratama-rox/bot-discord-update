@@ -1,6 +1,7 @@
 require("dotenv").config();
 const cron = require("node-cron");
 const { checkAndNotify } = require("./scheduler");
+const { initBot } = require("./webhook");
 
 // ============================
 // Validasi env wajib saat startup
@@ -8,7 +9,8 @@ const { checkAndNotify } = require("./scheduler");
 const requiredEnvs = [
   "SUPABASE_URL",
   "SUPABASE_ANON_KEY",
-  "DISCORD_WEBHOOK_URL",
+  "DISCORD_BOT_TOKEN",
+  "DISCORD_CHANNEL_ID",
   "SITE_BASE_URL",
 ];
 
@@ -49,8 +51,11 @@ console.log();
 // ============================
 // Jalankan sekali saat pertama kali bot start
 // ============================
-console.log("[INIT] Menjalankan pengecekan pertama saat startup...");
-checkAndNotify();
+console.log("[INIT] Login ke Discord...");
+initBot().then(() => {
+  console.log("[INIT] Menjalankan pengecekan pertama saat startup...");
+  checkAndNotify();
+});
 
 // ============================
 // Jadwalkan pengecekan berkala setiap X jam

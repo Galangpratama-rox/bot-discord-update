@@ -1,86 +1,115 @@
-const axios = require("axios");
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
 require("dotenv").config();
 
-if (!process.env.DISCORD_WEBHOOK_URL) {
-  console.error("[ERROR] DISCORD_WEBHOOK_URL wajib diisi di file .env");
-  process.exit(1);
+// Validasi env wajib
+const requiredEnvs = ["DISCORD_BOT_TOKEN", "DISCORD_CHANNEL_ID"];
+for (const key of requiredEnvs) {
+  if (!process.env[key]) {
+    console.error(`[ERROR] ${key} wajib diisi di file .env`);
+    process.exit(1);
+  }
 }
 
-const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 const SITE_BASE_URL = (process.env.SITE_BASE_URL || "https://www.animesaga.online").replace(/\/$/, "");
 const BOT_NAME = process.env.BOT_NAME || "AnimeSaga Bot";
-
-// Satu warna solid untuk semua embed
+const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
 const EMBED_COLOR = 0x2f3136;
 
+// Inisialisasi Discord client
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds],
+});
+
+let isReady = false;
+
 /**
- * Buat Discord embed object dari data anime.
- * thumbnail sudah berupa public URL dari Supabase Storage.
+ * Login bot Discord dan tunggu sampai ready.
+ */
+async function initBot() {
+  if (isReady) return;
+
+  return new Promise((resolve, reject) => {
+    client.once("ready", () => {
+      console.log(`[BOT] ✅ Login sebagai: ${client.user.tag}`);
+      isReady = true;
+      resolve();
+    });
+
+    client.once("error", reject);
+    client.login(process.env.DISCORD_BOT_TOKEN).catch(reject);
+  });
+}
+
+/**
+ * Buat Discord embed dari data anime.
  * @param {Object} anime
- * @returns {Object} Discord embed object
+ * @returns {EmbedBuilder}
  */
 function buildEmbed(anime) {
-  const embed = {
-    color: EMBED_COLOR,
-    title: `${anime.title} — ${anime.episode}`,
-    url: `${SITE_BASE_URL}/detail/${anime.animeId}`,
-    description: `Episode terbaru **${anime.title}** sudah tersedia di AnimeSaga!`,
-    footer: {
-      text: `${anime.day} • ${anime.date} • AnimeSaga`,
-    },
-    timestamp: new Date().toISOString(),
-  };
+  const embed = new EmbedBuilder()
+    .setColor(EMBED_COLOR)
+    .setAuthor({ name: "📢 Update Anime Terbaru!" })
+    .setTitle(`${anime.title} — ${anime.episode}`)
+    .setURL(`${SITE_BASE_URL}/detail/${anime.animeId}`)
+    .setDescription(`Episode terbaru **${anime.title}** sudah tersedia di AnimeSaga!`)
+    .setFooter({ text: `${anime.day} • ${anime.date} • AnimeSaga` })
+    .setTimestamp();
 
-  // Pasang thumbnail jika ada
   if (anime.thumbnail) {
-    embed.image = { url: anime.thumbnail };
+    embed.setImage(anime.thumbnail);
   }
 
   return embed;
 }
 
 /**
- * Kirim satu notifikasi anime ke Discord webhook.
+ * Buat button "Tonton" yang mengarah ke halaman detail anime.
  * @param {Object} anime
+ * @returns {ActionRowBuilder}
  */
-async function sendAnimeNotification(anime) {
-  const embed = buildEmbed(anime);
+function buildButton(anime) {
+  const button = new ButtonBuilder()
+    .setLabel("▶ Tonton")
+    .setStyle(ButtonStyle.Link)
+    .setURL(`${SITE_BASE_URL}/detail/${anime.animeId}`);
 
-  const payload = {
-    username: BOT_NAME,
-    content: "📢 **Update Anime Baru!**",
-    embeds: [embed],
-  };
-
-  try {
-    await axios.post(WEBHOOK_URL, payload, {
-      headers: { "Content-Type": "application/json" },
-      timeout: 10000,
-    });
-
-    console.log(`[WEBHOOK] ✅ Terkirim: ${anime.title} - ${anime.episode}`);
-  } catch (error) {
-    if (error.response) {
-      throw new Error(
-        `Webhook Discord error ${error.response.status}: ${JSON.stringify(error.response.data)}`
-      );
-    }
-    throw new Error(`Gagal kirim webhook: ${error.message}`);
-  }
+  return new ActionRowBuilder().addComponents(button);
 }
 
 /**
- * Kirim beberapa notifikasi anime sekaligus dengan jeda antar request.
- * Discord membatasi rate: 30 request per menit per webhook.
+ * Kirim satu notifikasi anime ke channel Discord.
+ * @param {Object} anime
+ */
+async function sendAnimeNotification(anime) {
+  await initBot();
+
+  const channel = await client.channels.fetch(CHANNEL_ID);
+  if (!channel) {
+    throw new Error(`Channel dengan ID ${CHANNEL_ID} tidak ditemukan.`);
+  }
+
+  const embed = buildEmbed(anime);
+  const row = buildButton(anime);
+
+  await channel.send({
+    embeds: [embed],
+    components: [row],
+  });
+
+  console.log(`[BOT] ✅ Terkirim: ${anime.title} - ${anime.episode}`);
+}
+
+/**
+ * Kirim beberapa notifikasi anime sekaligus dengan jeda antar pesan.
  * @param {Array<Object>} animeList
  */
 async function sendBatchNotifications(animeList) {
   if (animeList.length === 0) {
-    console.log("[WEBHOOK] Tidak ada notifikasi baru yang perlu dikirim.");
+    console.log("[BOT] Tidak ada notifikasi baru yang perlu dikirim.");
     return;
   }
 
-  console.log(`[WEBHOOK] Mengirim ${animeList.length} notifikasi ke Discord...`);
+  console.log(`[BOT] Mengirim ${animeList.length} notifikasi ke Discord...`);
 
   for (let i = 0; i < animeList.length; i++) {
     const anime = animeList[i];
@@ -88,18 +117,16 @@ async function sendBatchNotifications(animeList) {
     try {
       await sendAnimeNotification(anime);
     } catch (error) {
-      console.error(
-        `[WEBHOOK] ❌ Gagal kirim notifikasi untuk "${anime.title}": ${error.message}`
-      );
+      console.error(`[BOT] ❌ Gagal kirim notifikasi untuk "${anime.title}": ${error.message}`);
     }
 
-    // Jeda 1.5 detik antar request untuk menghindari rate limit Discord
+    // Jeda 1.5 detik antar pesan untuk menghindari rate limit Discord
     if (i < animeList.length - 1) {
       await sleep(1500);
     }
   }
 
-  console.log("[WEBHOOK] Selesai mengirim semua notifikasi.");
+  console.log("[BOT] Selesai mengirim semua notifikasi.");
 }
 
 /**
@@ -109,17 +136,15 @@ async function sendBatchNotifications(animeList) {
 async function sendSummaryMessage(count) {
   if (count === 0) return;
 
-  const payload = {
-    username: BOT_NAME,
-  };
+  await initBot();
 
   try {
-    await axios.post(WEBHOOK_URL, payload, {
-      headers: { "Content-Type": "application/json" },
-      timeout: 10000,
-    });
+    const channel = await client.channels.fetch(CHANNEL_ID);
+    if (channel) {
+      await channel.send(`✅ **${count} anime baru** telah dinotifikasikan!`);
+    }
   } catch (error) {
-    console.error(`[WEBHOOK] Gagal kirim summary: ${error.message}`);
+    console.error(`[BOT] Gagal kirim summary: ${error.message}`);
   }
 }
 
@@ -128,6 +153,7 @@ function sleep(ms) {
 }
 
 module.exports = {
+  initBot,
   sendAnimeNotification,
   sendBatchNotifications,
   sendSummaryMessage,
