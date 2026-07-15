@@ -134,18 +134,7 @@ async function sendBatchNotifications(animeList) {
  * @param {number} count
  */
 async function sendSummaryMessage(count) {
-  if (count === 0) return;
-
-  await initBot();
-
-  try {
-    const channel = await client.channels.fetch(CHANNEL_ID);
-    if (channel) {
-      await channel.send(`✅ **${count} anime baru** telah dinotifikasikan!`);
-    }
-  } catch (error) {
-    console.error(`[BOT] Gagal kirim summary: ${error.message}`);
-  }
+  // Summary message dinonaktifkan
 }
 
 function sleep(ms) {
