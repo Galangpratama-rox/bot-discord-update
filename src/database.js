@@ -29,6 +29,8 @@ async function downloadImageBuffer(url) {
     ? `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(url)}`
     : url;
 
+  console.log(`[STORAGE] Downloading via ${SCRAPER_API_KEY ? "ScraperAPI" : "direct"}: ${url}`);
+
   const response = await axios.get(requestUrl, {
     responseType: "arraybuffer",
     timeout: 30000,
