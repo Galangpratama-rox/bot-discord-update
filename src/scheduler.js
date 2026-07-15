@@ -3,6 +3,15 @@ const { isEpisodeExists, saveAnime, uploadThumbnail } = require("./database");
 const { sendBatchNotifications, sendSummaryMessage } = require("./webhook");
 
 /**
+ * Helper: jeda eksekusi selama X milidetik.
+ * Mencegah request massal ke ScraperAPI yang bisa terdeteksi sebagai spam.
+ * @param {number} ms
+ */
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
  * Fungsi utama: ambil data dari API, bandingkan dengan database,
  * simpan yang baru, dan kirim ke Discord webhook.
  */
@@ -75,7 +84,6 @@ async function checkAndNotify() {
     for (const anime of newAnimes) {
       try {
         // Upload thumbnail ke Supabase Storage dulu
-        // agar URL yang disimpan & dikirim ke Discord adalah URL publik milik kita
         const storedThumbnailUrl = await uploadThumbnail(anime.animeId, anime.thumbnail);
 
         // Ganti thumbnail URL dengan yang sudah di-host di Supabase Storage
@@ -93,6 +101,9 @@ async function checkAndNotify() {
           `[DB] ❌ Gagal simpan "${anime.title}": ${error.message}`
         );
       }
+
+      // Jeda 3 detik antar proses upload agar tidak terdeteksi spam oleh ScraperAPI
+      await delay(3000);
     }
 
     // Langkah 4: Kirim ke Discord webhook untuk yang berhasil disimpan
