@@ -16,17 +16,19 @@ const EMBED_COLOR = 0x2f3136;
 
 /**
  * Download gambar dari URL dan return sebagai Buffer.
+ * Menggunakan wsrv.nl sebagai proxy untuk bypass hotlink/IP block.
  * @param {string} url
  * @returns {Promise<{buffer: Buffer, contentType: string}>}
  */
 async function downloadImage(url) {
-  const response = await axios.get(url, {
+  // Proxy via wsrv.nl untuk bypass hotlink protection & IP block VPS
+  const proxyUrl = `https://wsrv.nl/?url=${encodeURIComponent(url)}`;
+
+  const response = await axios.get(proxyUrl, {
     responseType: "arraybuffer",
     timeout: 15000,
     headers: {
-      // Pura-pura browser untuk bypass hotlink protection
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-      "Referer": "https://otakudesu.blog/",
     },
   });
 
