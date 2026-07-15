@@ -91,11 +91,6 @@ async function uploadThumbnail(animeId, thumbnailUrl) {
   }
 }
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
-);
-
 /**
  * Ambil semua animeId yang sudah tersimpan di database.
  * Dipakai untuk membandingkan dengan data dari API.
