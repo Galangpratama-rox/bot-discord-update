@@ -33,7 +33,7 @@ async function downloadImageBuffer(url) {
 
   const response = await axios.get(requestUrl, {
     responseType: "arraybuffer",
-    timeout: 30000,
+    timeout: 60000, // 60 detik
     headers: {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
     },
