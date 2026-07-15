@@ -111,7 +111,6 @@ async function sendSummaryMessage(count) {
 
   const payload = {
     username: BOT_NAME,
-    content: `✅ **${count} anime baru** telah dinotifikasikan!`,
   };
 
   try {

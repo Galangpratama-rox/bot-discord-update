@@ -16,22 +16,27 @@ const supabase = createClient(
 );
 
 const STORAGE_BUCKET = "thumbnails";
+const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY || "";
 
 /**
- * Download gambar dari URL otakudesu dengan spoofed headers.
+ * Download gambar menggunakan ScraperAPI untuk bypass hotlink/IP block.
+ * Fallback ke direct request jika SCRAPER_API_KEY tidak diset.
  * @param {string} url
  * @returns {Promise<{buffer: Buffer, contentType: string}>}
  */
 async function downloadImageBuffer(url) {
-  const response = await axios.get(url, {
+  const requestUrl = SCRAPER_API_KEY
+    ? `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(url)}`
+    : url;
+
+  const response = await axios.get(requestUrl, {
     responseType: "arraybuffer",
-    timeout: 15000,
+    timeout: 30000,
     headers: {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-      "Referer": "https://otakudesu.blog/",
-      "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
     },
   });
+
   return {
     buffer: Buffer.from(response.data),
     contentType: response.headers["content-type"] || "image/jpeg",
