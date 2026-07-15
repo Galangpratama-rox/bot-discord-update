@@ -19,8 +19,9 @@ const STORAGE_BUCKET = "thumbnails";
 const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY || "";
 
 /**
- * Download gambar menggunakan ScraperAPI dengan parameter premium + binary.
- * Validasi content-type sebelum return agar tidak upload HTML zonk ke Supabase.
+ * Download gambar dengan 2 strategi berurutan:
+ * 1. ScraperAPI ultra_premium + binary=true
+ * 2. Fallback: Axios langsung dengan spoofed browser headers
  * @param {string} url
  * @returns {Promise<{buffer: Buffer, contentType: string}>}
  */
@@ -29,32 +30,64 @@ async function downloadImageBuffer(url) {
     throw new Error("SCRAPER_API_KEY belum diisi di .env");
   }
 
-  // Gunakan premium=true dan binary=true khusus untuk file gambar
-  const requestUrl = `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(url)}&premium=true&binary=true`;
+  // === Strategi 1: ScraperAPI ultra_premium + binary ===
+  try {
+    const scraperUrl = `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(url)}&ultra_premium=true&binary=true`;
 
-  console.log(`[STORAGE] Downloading via ScraperAPI (premium+binary): ${url}`);
+    console.log(`[STORAGE] Downloading via ScraperAPI (ultra_premium+binary): ${url}`);
 
-  const response = await axios.get(requestUrl, {
-    responseType: "arraybuffer",
-    timeout: 60000, // 60 detik
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-    },
-  });
+    const response = await axios.get(scraperUrl, {
+      responseType: "arraybuffer",
+      timeout: 60000,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      },
+    });
 
-  const contentType = response.headers["content-type"] || "";
+    const contentType = response.headers["content-type"] || "";
 
-  // Validasi: jika response adalah HTML (kena Cloudflare/captcha), batalkan
-  if (contentType.includes("text/html")) {
-    throw new Error(
-      `Response bukan gambar (content-type: ${contentType}) — kemungkinan kena blokir Cloudflare`
-    );
+    if (contentType.includes("text/html")) {
+      throw new Error("ScraperAPI mengembalikan HTML (Blokir), bukan gambar.");
+    }
+
+    console.log(`[STORAGE] ✅ Download via ScraperAPI berhasil.`);
+    return {
+      buffer: Buffer.from(response.data),
+      contentType: contentType || "image/jpeg",
+    };
+  } catch (err) {
+    const status = err.response?.status || "no response";
+    console.warn(`[STORAGE] ⚠️ Gagal DOWNLOAD (ScraperAPI): ${err.message} | Status: ${status}`);
+    console.warn(`[STORAGE] 🔄 Mencoba fallback Axios langsung...`);
   }
 
-  return {
-    buffer: Buffer.from(response.data),
-    contentType: contentType || "image/jpeg",
-  };
+  // === Strategi 2: Fallback Axios langsung dengan spoofed browser headers ===
+  try {
+    const response = await axios.get(url, {
+      responseType: "arraybuffer",
+      timeout: 30000,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://otakudesu.blog/",
+        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+      },
+    });
+
+    const contentType = response.headers["content-type"] || "";
+
+    if (contentType.includes("text/html")) {
+      throw new Error("Fallback juga mengembalikan HTML (Blokir), bukan gambar.");
+    }
+
+    console.log(`[STORAGE] ✅ Download via fallback Axios berhasil.`);
+    return {
+      buffer: Buffer.from(response.data),
+      contentType: contentType || "image/jpeg",
+    };
+  } catch (err) {
+    const status = err.response?.status || "no response";
+    throw new Error(`Gagal DOWNLOAD (Fallback Axios): ${err.message} | Status: ${status}`);
+  }
 }
 
 /**
