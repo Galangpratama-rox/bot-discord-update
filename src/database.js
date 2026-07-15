@@ -19,17 +19,20 @@ const STORAGE_BUCKET = "thumbnails";
 const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY || "";
 
 /**
- * Download gambar menggunakan ScraperAPI untuk bypass hotlink/IP block.
- * Fallback ke direct request jika SCRAPER_API_KEY tidak diset.
+ * Download gambar menggunakan ScraperAPI dengan parameter premium + binary.
+ * Validasi content-type sebelum return agar tidak upload HTML zonk ke Supabase.
  * @param {string} url
  * @returns {Promise<{buffer: Buffer, contentType: string}>}
  */
 async function downloadImageBuffer(url) {
-  const requestUrl = SCRAPER_API_KEY
-    ? `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(url)}`
-    : url;
+  if (!SCRAPER_API_KEY) {
+    throw new Error("SCRAPER_API_KEY belum diisi di .env");
+  }
 
-  console.log(`[STORAGE] Downloading via ${SCRAPER_API_KEY ? "ScraperAPI" : "direct"}: ${url}`);
+  // Gunakan premium=true dan binary=true khusus untuk file gambar
+  const requestUrl = `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(url)}&premium=true&binary=true`;
+
+  console.log(`[STORAGE] Downloading via ScraperAPI (premium+binary): ${url}`);
 
   const response = await axios.get(requestUrl, {
     responseType: "arraybuffer",
@@ -39,9 +42,18 @@ async function downloadImageBuffer(url) {
     },
   });
 
+  const contentType = response.headers["content-type"] || "";
+
+  // Validasi: jika response adalah HTML (kena Cloudflare/captcha), batalkan
+  if (contentType.includes("text/html")) {
+    throw new Error(
+      `Response bukan gambar (content-type: ${contentType}) — kemungkinan kena blokir Cloudflare`
+    );
+  }
+
   return {
     buffer: Buffer.from(response.data),
-    contentType: response.headers["content-type"] || "image/jpeg",
+    contentType: contentType || "image/jpeg",
   };
 }
 
