@@ -1,5 +1,5 @@
 const { fetchOngoingAnime } = require("./api");
-const { isEpisodeExists, saveAnime } = require("./database");
+const { isEpisodeExists, saveAnime, uploadThumbnail } = require("./database");
 const { sendBatchNotifications, sendSummaryMessage } = require("./webhook");
 
 /**
@@ -67,23 +67,31 @@ async function checkAndNotify() {
       return;
     }
 
-    // Langkah 3: Simpan ke database dan kirim ke webhook
+    // Langkah 3: Upload thumbnail ke Supabase Storage & simpan ke database
     console.log("\n[SCHEDULER] Menyimpan dan mengirim notifikasi...");
 
     const successfullySaved = [];
 
     for (const anime of newAnimes) {
       try {
-        // Simpan ke database dulu
-        await saveAnime(anime);
+        // Upload thumbnail ke Supabase Storage dulu
+        // agar URL yang disimpan & dikirim ke Discord adalah URL publik milik kita
+        const storedThumbnailUrl = await uploadThumbnail(anime.animeId, anime.thumbnail);
+
+        // Ganti thumbnail URL dengan yang sudah di-host di Supabase Storage
+        const animeWithStoredThumb = {
+          ...anime,
+          thumbnail: storedThumbnailUrl || anime.thumbnail,
+        };
+
+        // Simpan ke database
+        await saveAnime(animeWithStoredThumb);
         console.log(`[DB] ✅ Tersimpan: ${anime.title} - ${anime.episode}`);
-        successfullySaved.push(anime);
+        successfullySaved.push(animeWithStoredThumb);
       } catch (error) {
         console.error(
           `[DB] ❌ Gagal simpan "${anime.title}": ${error.message}`
         );
-        // Jika gagal simpan, jangan kirim webhook untuk anime ini
-        // agar tidak ada duplikat notif jika ada retry
       }
     }
 

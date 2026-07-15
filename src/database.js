@@ -1,4 +1,5 @@
 const { createClient } = require("@supabase/supabase-js");
+const axios = require("axios");
 require("dotenv").config();
 
 // Validasi env yang wajib ada
@@ -7,6 +8,87 @@ if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
     "[ERROR] SUPABASE_URL dan SUPABASE_ANON_KEY wajib diisi di file .env"
   );
   process.exit(1);
+}
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_ANON_KEY
+);
+
+const STORAGE_BUCKET = "thumbnails";
+
+/**
+ * Download gambar dari URL otakudesu dengan spoofed headers.
+ * @param {string} url
+ * @returns {Promise<{buffer: Buffer, contentType: string}>}
+ */
+async function downloadImageBuffer(url) {
+  const response = await axios.get(url, {
+    responseType: "arraybuffer",
+    timeout: 15000,
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+      "Referer": "https://otakudesu.blog/",
+      "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+    },
+  });
+  return {
+    buffer: Buffer.from(response.data),
+    contentType: response.headers["content-type"] || "image/jpeg",
+  };
+}
+
+/**
+ * Upload thumbnail ke Supabase Storage dan return public URL-nya.
+ * Jika sudah ada (anime yang sama), langsung return URL yang existing.
+ * @param {string} animeId
+ * @param {string} thumbnailUrl - URL asli dari API
+ * @returns {Promise<string|null>} Public URL di Supabase Storage, atau null jika gagal
+ */
+async function uploadThumbnail(animeId, thumbnailUrl) {
+  if (!thumbnailUrl) return null;
+
+  const fileName = `${animeId}.jpg`;
+
+  // Cek apakah sudah ada di storage
+  const { data: existing } = await supabase.storage
+    .from(STORAGE_BUCKET)
+    .list("", { search: fileName });
+
+  if (existing && existing.length > 0) {
+    // Sudah ada, langsung return public URL
+    const { data } = supabase.storage
+      .from(STORAGE_BUCKET)
+      .getPublicUrl(fileName);
+    return data.publicUrl;
+  }
+
+  // Belum ada, download dulu lalu upload
+  try {
+    const { buffer, contentType } = await downloadImageBuffer(thumbnailUrl);
+
+    const { error } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .upload(fileName, buffer, {
+        contentType,
+        upsert: true,
+      });
+
+    if (error) {
+      console.warn(`[STORAGE] ⚠️ Gagal upload thumbnail ${animeId}: ${error.message}`);
+      return null;
+    }
+
+    const { data } = supabase.storage
+      .from(STORAGE_BUCKET)
+      .getPublicUrl(fileName);
+
+    console.log(`[STORAGE] ✅ Upload thumbnail: ${animeId}`);
+    return data.publicUrl;
+  } catch (err) {
+    console.warn(`[STORAGE] ⚠️ Gagal download/upload thumbnail ${animeId}: ${err.message}`);
+    return null;
+  }
 }
 
 const supabase = createClient(
@@ -118,4 +200,5 @@ module.exports = {
   isEpisodeExists,
   saveAnime,
   saveAnimesBatch,
+  uploadThumbnail,
 };

@@ -1,5 +1,4 @@
 const axios = require("axios");
-const FormData = require("form-data");
 require("dotenv").config();
 
 if (!process.env.DISCORD_WEBHOOK_URL) {
@@ -15,83 +14,33 @@ const BOT_NAME = process.env.BOT_NAME || "AnimeSaga Bot";
 const EMBED_COLOR = 0x2f3136;
 
 /**
- * Download gambar dari URL dan return sebagai Buffer.
- * Coba wsrv.nl dulu, fallback ke URL langsung jika gagal.
- * @param {string} url
- * @returns {Promise<{buffer: Buffer, contentType: string}>}
- */
-async function downloadImage(url) {
-  const attempts = [
-    // Attempt 1: proxy via wsrv.nl
-    () => axios.get(`https://wsrv.nl/?url=${encodeURIComponent(url)}`, {
-      responseType: "arraybuffer",
-      timeout: 15000,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-      },
-    }),
-    // Attempt 2: langsung ke URL asli dengan spoofed headers
-    () => axios.get(url, {
-      responseType: "arraybuffer",
-      timeout: 15000,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://otakudesu.blog/",
-        "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
-      },
-    }),
-    // Attempt 3: proxy via images.weserv.nl (alias lain wsrv.nl)
-    () => axios.get(`https://images.weserv.nl/?url=${encodeURIComponent(url)}&default=1`, {
-      responseType: "arraybuffer",
-      timeout: 15000,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-      },
-    }),
-  ];
-
-  for (let i = 0; i < attempts.length; i++) {
-    try {
-      const response = await attempts[i]();
-      return {
-        buffer: Buffer.from(response.data),
-        contentType: response.headers["content-type"] || "image/jpeg",
-      };
-    } catch (err) {
-      console.warn(`[WEBHOOK] ⚠️ Download attempt ${i + 1} gagal: ${err.message}`);
-    }
-  }
-
-  throw new Error("Semua attempt download gambar gagal");
-}
-
-/**
  * Buat Discord embed object dari data anime.
+ * thumbnail sudah berupa public URL dari Supabase Storage.
  * @param {Object} anime
  * @returns {Object} Discord embed object
  */
 function buildEmbed(anime) {
-  return {
+  const embed = {
     color: EMBED_COLOR,
-    // Menaruh status update di bagian author (atas title)
-    author: {
-      name: `📢 Update Anime Terbaru!`,
-    },
     title: `${anime.title} — ${anime.episode}`,
     url: `${SITE_BASE_URL}/detail/${anime.animeId}`,
     description: `Episode terbaru **${anime.title}** sudah tersedia di AnimeSaga!`,
-    image: {
-      url: "attachment://gambar.jpg",
-    },
     footer: {
       text: `${anime.day} • ${anime.date} • AnimeSaga`,
     },
+    timestamp: new Date().toISOString(),
   };
+
+  // Pasang thumbnail jika ada
+  if (anime.thumbnail) {
+    embed.image = { url: anime.thumbnail };
+  }
+
+  return embed;
 }
 
 /**
- * Kirim satu notifikasi anime ke Discord webhook menggunakan multipart/form-data
- * agar thumbnail bisa dikirim sebagai attachment.
+ * Kirim satu notifikasi anime ke Discord webhook.
  * @param {Object} anime
  */
 async function sendAnimeNotification(anime) {
@@ -99,52 +48,15 @@ async function sendAnimeNotification(anime) {
 
   const payload = {
     username: BOT_NAME,
+    content: "📢 **Update Anime Baru!**",
     embeds: [embed],
   };
 
   try {
-    // Coba download thumbnail untuk dijadikan attachment
-    let imageBuffer = null;
-    let contentType = "image/jpeg";
-
-    if (anime.thumbnail) {
-      try {
-        const result = await downloadImage(anime.thumbnail);
-        imageBuffer = result.buffer;
-        contentType = result.contentType;
-      } catch (imgError) {
-        console.warn(`[WEBHOOK] ⚠️ Gagal download thumbnail "${anime.title}": ${imgError.message}`);
-      }
-    }
-
-    if (imageBuffer) {
-      // Kirim sebagai multipart/form-data dengan attachment
-      const form = new FormData();
-      form.append("payload_json", JSON.stringify(payload));
-      form.append("files[0]", imageBuffer, {
-        filename: "gambar.jpg",
-        contentType: contentType,
-      });
-
-      await axios.post(WEBHOOK_URL, form, {
-        headers: form.getHeaders(),
-        timeout: 20000,
-      });
-    } else {
-      // Fallback: kirim tanpa gambar jika download gagal
-      const fallbackPayload = {
-        ...payload,
-        embeds: [{
-          ...embed,
-          image: undefined,
-        }],
-      };
-
-      await axios.post(WEBHOOK_URL, fallbackPayload, {
-        headers: { "Content-Type": "application/json" },
-        timeout: 10000,
-      });
-    }
+    await axios.post(WEBHOOK_URL, payload, {
+      headers: { "Content-Type": "application/json" },
+      timeout: 10000,
+    });
 
     console.log(`[WEBHOOK] ✅ Terkirim: ${anime.title} - ${anime.episode}`);
   } catch (error) {
@@ -168,9 +80,7 @@ async function sendBatchNotifications(animeList) {
     return;
   }
 
-  console.log(
-    `[WEBHOOK] Mengirim ${animeList.length} notifikasi ke Discord...`
-  );
+  console.log(`[WEBHOOK] Mengirim ${animeList.length} notifikasi ke Discord...`);
 
   for (let i = 0; i < animeList.length; i++) {
     const anime = animeList[i];
@@ -181,7 +91,6 @@ async function sendBatchNotifications(animeList) {
       console.error(
         `[WEBHOOK] ❌ Gagal kirim notifikasi untuk "${anime.title}": ${error.message}`
       );
-      // Lanjutkan ke anime berikutnya meski ada yang gagal
     }
 
     // Jeda 1.5 detik antar request untuk menghindari rate limit Discord
@@ -194,14 +103,15 @@ async function sendBatchNotifications(animeList) {
 }
 
 /**
- * Kirim pesan ringkasan jika banyak anime baru sekaligus (opsional).
- * @param {number} count - Jumlah anime baru
+ * Kirim pesan ringkasan setelah semua notifikasi terkirim.
+ * @param {number} count
  */
 async function sendSummaryMessage(count) {
   if (count === 0) return;
 
   const payload = {
     username: BOT_NAME,
+    content: `✅ **${count} anime baru** telah dinotifikasikan!`,
   };
 
   try {
