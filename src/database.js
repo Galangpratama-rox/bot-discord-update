@@ -59,7 +59,7 @@ async function downloadImageBuffer(url) {
 
 /**
  * Upload thumbnail ke Supabase Storage dan return public URL-nya.
- * Jika sudah ada (anime yang sama), langsung return URL yang existing.
+ * Download dan upload dipisah try-catch agar error bisa diidentifikasi dengan jelas.
  * @param {string} animeId
  * @param {string} thumbnailUrl - URL asli dari API
  * @returns {Promise<string|null>} Public URL di Supabase Storage, atau null jika gagal
@@ -75,17 +75,32 @@ async function uploadThumbnail(animeId, thumbnailUrl) {
     .list("", { search: fileName });
 
   if (existing && existing.length > 0) {
-    // Sudah ada, langsung return public URL
     const { data } = supabase.storage
       .from(STORAGE_BUCKET)
       .getPublicUrl(fileName);
     return data.publicUrl;
   }
 
-  // Belum ada, download dulu lalu upload
+  // === STEP 1: Download gambar via ScraperAPI ===
+  let buffer, contentType;
   try {
-    const { buffer, contentType } = await downloadImageBuffer(thumbnailUrl);
+    const result = await downloadImageBuffer(thumbnailUrl);
+    buffer = result.buffer;
+    contentType = result.contentType;
+  } catch (err) {
+    const status = err.response?.status || "no response";
+    const message = err.message || "unknown error";
 
+    if (message.includes("HTML")) {
+      console.warn(`[STORAGE] ⚠️ Gagal DOWNLOAD (ScraperAPI): ScraperAPI mengembalikan HTML (Blokir), bukan gambar. | URL: ${thumbnailUrl}`);
+    } else {
+      console.warn(`[STORAGE] ⚠️ Gagal DOWNLOAD (ScraperAPI): ${message} | Status: ${status}`);
+    }
+    return null;
+  }
+
+  // === STEP 2: Upload ke Supabase Storage ===
+  try {
     const { error } = await supabase.storage
       .from(STORAGE_BUCKET)
       .upload(fileName, buffer, {
@@ -94,7 +109,7 @@ async function uploadThumbnail(animeId, thumbnailUrl) {
       });
 
     if (error) {
-      console.warn(`[STORAGE] ⚠️ Gagal upload thumbnail ${animeId}: ${error.message}`);
+      console.warn(`[STORAGE] ⚠️ Gagal UPLOAD (Supabase): ${error.message}`);
       return null;
     }
 
@@ -102,10 +117,10 @@ async function uploadThumbnail(animeId, thumbnailUrl) {
       .from(STORAGE_BUCKET)
       .getPublicUrl(fileName);
 
-    console.log(`[STORAGE] ✅ Upload thumbnail: ${animeId}`);
+    console.log(`[STORAGE] ✅ Upload berhasil: ${animeId}`);
     return data.publicUrl;
   } catch (err) {
-    console.warn(`[STORAGE] ⚠️ Gagal download/upload thumbnail ${animeId}: ${err.message}`);
+    console.warn(`[STORAGE] ⚠️ Gagal UPLOAD (Supabase): ${err.message}`);
     return null;
   }
 }
